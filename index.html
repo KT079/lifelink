@@ -617,6 +617,28 @@
   .radar-body { grid-template-columns:1fr; gap:20px; }
 }
 
+/* ===== Chat assistant ===== */
+.chat-fab { position:fixed; right:20px; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); width:58px; height:58px; border-radius:50%; border:0; background:var(--red); color:#fff; display:grid; place-items:center; cursor:pointer; box-shadow:0 10px 26px rgba(225,29,46,.45); z-index:20; }
+.chat-fab svg { width:28px; height:28px; }
+.chat-panel { position:fixed; right:20px; bottom:92px; width:360px; max-width:calc(100vw - 24px); height:520px; max-height:calc(100vh - 110px); display:flex; flex-direction:column; background:#fff; border:1px solid var(--bd); border-radius:18px; overflow:hidden; box-shadow:0 20px 50px rgba(11,23,48,.35); z-index:21; }
+.chat-panel[hidden] { display:none; }
+.chat-panel header { background:#0B1730; color:#fff; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; }
+.chat-panel header small { display:block; color:#aab4d4; font-size:12px; }
+.chat-panel header button { background:none; border:0; color:#fff; font-size:18px; cursor:pointer; min-width:36px; min-height:36px; }
+.chat-msgs { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:#F8F9FB; }
+.chat-msgs .m { max-width:90%; padding:10px 12px; border-radius:14px; font-size:14px; line-height:1.45; }
+.chat-msgs .bot { background:#fff; border:1px solid var(--bd); align-self:flex-start; border-bottom-left-radius:4px; color:var(--navy); }
+.chat-msgs .usr { background:var(--red); color:#fff; align-self:flex-end; border-bottom-right-radius:4px; }
+.chat-msgs a { color:var(--red); font-weight:700; text-decoration:underline; }
+.chat-msgs ul, .chat-msgs ol { margin:6px 0; padding-left:20px; }
+.chat-msgs small { display:block; margin-top:6px; color:var(--mut); font-size:12px; }
+.chat-chips { display:flex; gap:6px; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--bd); background:#fff; max-height:112px; overflow-y:auto; }
+.chat-chips button { border:1px solid var(--bd); background:var(--blush); color:var(--crim); border-radius:99px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; }
+.chat-in { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--bd); background:#fff; }
+.chat-in input { min-height:40px; padding:8px 12px; border-radius:12px; }
+.chat-in .btn { min-height:40px; }
+@media (max-width:860px) { .chat-panel { left:8px; right:8px; width:auto; bottom:88px; } }
+
   </style>
 </head>
 
@@ -2440,12 +2462,157 @@ setActive(key);
     }
 
     /* =========================================================
+   8. CHAT ASSISTANT (rule-based, runs in the browser)
+   Answers questions about using the site and about available donors.
+   ========================================================= */
+const CHAT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+const CHAT_CHIPS = ["How do I register as a blood donor?", "Find B+ donors", "Who can donate to O-?", "How do I request blood?", "How does the radar work?"];
+const ORGAN_WORDS = { kidney: ["Kidney", "Kidneys"], liver: ["Part of liver", "Liver"], heart: ["Heart"], lung: ["Lungs"], cornea: ["Corneas (eyes)"], eye: ["Corneas (eyes)"],
+                      skin: ["Skin"], pancreas: ["Pancreas"], intestine: ["Small intestine"], bone: ["Bones and tissue"], valve: ["Heart valves"] };
+
+// Help answers (first matching rule wins)
+const CHAT_KB = [
+  [/^(hi|hii|hello|hey|namaste|good (morning|afternoon|evening))\b/, `Hello! I can help you use LifeLink and find available donors. Ask me something like <i>"Find O- donors in Lucknow"</i> or use a button below.`],
+  [/thank/, `You're welcome! Ask me anything else about LifeLink.`],
+  [/organ|kidney|liver|cornea|pledge/, `For <b>organ donation</b> use <a href="#/register/organ">Organ donor registration</a>. You tick the organs you are willing to donate and see nearby transplant hospitals. This only records your interest. Real organ donation needs legal and family consent, so also pledge with NOTTO/SOTTO. More: <a href="#/organ">Organ information</a>.`],
+  [/radar|map|nearby donor|around me/, `The <a href="#/radar">Live Radar</a> shows donors around a city or your GPS spot. The red centre is you and the green dots are donors with their blood group. Move the radius slider (5 to 50 km), click a dot for details and send a contact request. Positions are approximate to protect privacy.`],
+  [/(request|need|require|urgent).*(blood|organ|donor)|hospital|create request|my request/, `To <b>request blood or an organ</b> (hospital side):<ol><li>Open the <a href="#/hospital">Hospital dashboard</a>.</li><li>Choose <a href="#/hospital/create">Create Request</a>, pick blood or organ, fill the details and confirm.</li><li>Open <a href="#/hospital/requests">My Requests</a> and press <i>Find donors</i> to see matching donors.</li></ol>`],
+  [/log ?in|otp|code|sign in|password/, `Login uses a one-time code:<ol><li>Open <a href="#/login">Login</a> and enter your email (donors must register first).</li><li>A 6-digit code is emailed to you (valid 5 minutes).</li><li>Enter it to open your profile (donor) or dashboard (hospital).</li></ol>`],
+  [/(search|find|look).*(donor)|donor search/, `<a href="#/hospital/donors">Donor Search</a> filters by Blood or Organ, the patient's blood group (compatibility), state, city and availability. The best match is listed first. Press <i>Contact</i> to send a request. You can also ask me, for example <i>"Find A+ donors in Delhi"</i>.`],
+  [/contact|phone|number|reach|call|message/, `You cannot see a donor's phone number straight away. A hospital sends a <b>contact request</b> from Donor Search or the Radar. The donor accepts or declines in their profile, and contact details are shown only after acceptance.`],
+  [/availab|not available|profile|my account/, `Donors can mark themselves available or not in their profile (<a href="#/me">My profile</a> after login). Only available donors appear in search and on the radar.`],
+  [/privacy|safe|secure|consent|data|trust/, `LifeLink protects donors: three consent boxes at registration, names shown as first name and initial, contact only after the donor accepts, and approximate radar positions. LifeLink is a student prototype and does not replace hospitals or blood banks.`],
+  [/regist|sign ?up|become|how.*donat|join|donate blood|donor form/, `To register as a <b>blood donor</b>:<ol><li>Open <a href="#/register/blood">Blood donor registration</a>.</li><li>Fill 5 steps: personal details, blood group, state and city, notes and consent.</li><li>In step 3 you can pick nearby hospitals and optionally share your area for the radar.</li><li>Log in later with your email to see requests and set your availability.</li></ol>`],
+  [/what is|about|lifelink|how.*work|help|what can you/, `LifeLink connects blood and organ donors with hospitals. Donors register, hospitals post requests and search donors, and donors accept or decline. Ask me about registering, requests, the radar, or available donors for a blood group, for example <i>"B+ donors in Delhi"</i>.`]
+];
+
+// "AB+", "o negative", "B-" ...  ->  "AB+", "O-", "B-" (or null)
+function chatGroup(t) {
+  const m = t.match(/\b(ab|a|b|o)\s*([+\-\u2212\u2013]|positive|negative|pos|neg)(?![a-z])/i);
+  if (!m) return null;
+  return m[1].toUpperCase() + (/^[+]|^pos/i.test(m[2]) ? "+" : "-");
+}
+
+// finds a city (and its state) or a state in the text
+function chatPlace(t) {
+  const has = w => new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(t);
+  for (const [state, cities] of Object.entries(INDIA)) for (const c of cities) if (has(c)) return { city: c, state };
+  for (const state of Object.keys(INDIA)) if (has(state)) return { city: "", state };
+  return null;
+}
+
+// available donors, shortened names only
+const chatBloodPool = () => [
+  ...registeredDonors().filter(d => d.type === "blood" && d.av !== false).map(d => ({ n: shortName(d.name), g: d.bg, city: d.city, state: d.state, sample: false })),
+  ...RADAR_SAMPLE.filter(d => d.type === "Blood").map(d => ({ n: d.n, g: d.g, city: "", state: "", sample: true }))
+];
+const chatOrganPool = () => [
+  ...registeredDonors().filter(d => d.type === "organ" && d.av !== false).map(d => ({ n: shortName(d.name), g: d.bg, city: d.city, state: d.state, organs: d.organs || [], sample: false })),
+  ...RADAR_SAMPLE.filter(d => d.type === "Organ").map(d => ({ n: d.n, g: d.g, city: "", state: "", organs: d.organs, sample: true }))
+];
+const inPlace = (pool, p) => !p ? pool : pool.filter(d => !d.sample && (p.city ? compact(d.city) === compact(p.city) : compact(d.state) === compact(p.state)));
+const placeText = p => p ? " in " + esc(p.city || p.state) : "";
+const chatNote = `<small>Names are shortened for privacy. To contact someone, open <a href="#/hospital/donors">Donor Search</a> or the <a href="#/radar">Radar</a>. The donor must accept first, and the blood bank makes the final compatibility check.</small>`;
+const lineOf = d => `<li>${esc(d.n)} · ${esc(d.g)}${d.city ? " · " + esc(d.city) : ""}${d.sample ? " <i>(sample)</i>" : ""}</li>`;
+
+function chatBloodAnswer(g, p) {
+  const pool = inPlace(chatBloodPool(), p);
+  const same = pool.filter(d => d.g === g);
+  const other = pool.filter(d => d.g !== g && (CAN_GIVE[d.g] || []).includes(g));
+  if (!same.length && !other.length)
+    return `I could not find any available donors for <b>${g}</b>${placeText(p)} right now. ${p ? `Try asking without the place, for example <i>"${g} donors"</i>, or ` : "Try again later, or "}<a href="#/hospital/create">create a request</a>.`;
+  const by = {}; other.forEach(d => by[d.g] = (by[d.g] || 0) + 1);
+  const breakdown = Object.entries(by).map(([k, v]) => `${k} (${v})`).join(", ");
+  return `<b>Patient needs ${g}</b>${placeText(p)}:<ul>
+    <li><b>${same.length}</b> available donor${same.length === 1 ? "" : "s"} with ${g}</li>
+    <li><b>${other.length}</b> with another compatible group${breakdown ? ": " + breakdown : ""}</li></ul>
+    ${same.length ? "<b>Same group:</b><ul>" + same.slice(0, 5).map(lineOf).join("") + "</ul>" : ""}
+    ${same.length > 5 ? `<small>Showing 5 of ${same.length}.</small>` : ""}${chatNote}`;
+}
+
+function chatOrganAnswer(word, p) {
+  const names = ORGAN_WORDS[word];
+  const rows = inPlace(chatOrganPool(), p).filter(d => d.organs.some(o => names.includes(o)));
+  if (!rows.length) return `No available organ donors have chosen <b>${esc(names[0])}</b>${placeText(p)} right now.`;
+  return `<b>${rows.length}</b> available organ donor${rows.length === 1 ? "" : "s"} willing to donate <b>${esc(names[0])}</b>${placeText(p)}:<ul>${rows.slice(0, 5).map(lineOf).join("")}</ul>
+    <small>Organ donation needs legal and family consent, and allocation is done only by NOTTO/SOTTO. This list only shows interest.</small>${chatNote}`;
+}
+
+function chatReply(text) {
+  const t = text.toLowerCase().trim();
+  if (!t) return "";
+  const g = chatGroup(t), p = chatPlace(t);
+
+  // blood group rules: "who can donate to O-", "O+ can give to whom"
+  if (g && /(who|which)/.test(t) && /(give|donate|receive)/.test(t)) {
+    const givers = Object.keys(CAN_GIVE).filter(k => CAN_GIVE[k].includes(g));
+    return `Groups that can give blood to <b>${g}</b>: <b>${givers.join(", ")}</b>.<small>The blood bank always confirms compatibility.</small>`;
+  }
+  if (g && /(give|donate)\s*to|can\s+(give|donate)|compatib/.test(t) && !/donors?\b/.test(t))
+    return `<b>${g}</b> can give blood to: <b>${CAN_GIVE[g].join(", ")}</b>.<small>The blood bank always confirms compatibility.</small>`;
+
+  // donors for a blood group
+  if (g) return chatBloodAnswer(g, p);
+
+  // donors with an organ
+  for (const w of Object.keys(ORGAN_WORDS))
+    if (t.includes(w) && /(donor|available|who|any|find|list|show)/.test(t)) return chatOrganAnswer(w, p);
+
+  // "any donors in Delhi?" without a group
+  if (p && /(donor|available|who|any)/.test(t))
+    return `Which blood group do you need${placeText(p)}? Type it like <i>"B+ donors${placeText(p)}"</i>.`;
+
+  for (const [re, ans] of CHAT_KB) if (re.test(t)) return ans;
+  return `I can help with: registering as a donor, requesting blood, donor search, the radar, login, and available donors for a blood group (for example <i>"Find O- donors in Lucknow"</i>). Try one of the buttons below.`;
+}
+
+function initChat() {
+  if ($("#chat")) return;
+  const wrap = document.createElement("div");
+  wrap.id = "chat";
+  wrap.innerHTML = `
+    <button class="chat-fab" id="chat-open" aria-label="Open the LifeLink assistant">${CHAT_ICON}</button>
+    <section class="chat-panel" id="chat-panel" hidden aria-label="LifeLink assistant">
+      <header><div><b>LifeLink Assistant</b><small>Ask about donors or how to use the site</small></div><button id="chat-close" aria-label="Close chat">✕</button></header>
+      <div class="chat-msgs" id="chat-msgs" aria-live="polite"></div>
+      <div class="chat-chips" id="chat-chips">${CHAT_CHIPS.map(c => `<button type="button">${esc(c)}</button>`).join("")}</div>
+      <div class="chat-in"><input id="chat-input" placeholder="Type your question…" autocomplete="off" aria-label="Your question"><button class="btn dk sm" id="chat-send" type="button">Send</button></div>
+    </section>`;
+  document.body.appendChild(wrap);
+
+  const panel = $("#chat-panel"), msgs = $("#chat-msgs"), input = $("#chat-input");
+  const add = (who, html) => { const d = document.createElement("div"); d.className = "m " + who; d.innerHTML = html; msgs.appendChild(d); msgs.scrollTop = msgs.scrollHeight; };
+  const send = text => {
+    text = String(text || "").trim().slice(0, 200);
+    if (!text) return;
+    add("usr", esc(text));
+    input.value = "";
+    setTimeout(() => add("bot", chatReply(text)), 250);
+  };
+  const open = () => {
+    panel.hidden = false;
+    if (!msgs.children.length) add("bot", `Hi! I'm the LifeLink assistant. I can show how to use the website and tell you which donors are available for a blood group. What do you need?`);
+    input.focus();
+  };
+
+  $("#chat-open").onclick = () => panel.hidden ? open() : (panel.hidden = true);
+  $("#chat-close").onclick = () => panel.hidden = true;
+  $("#chat-send").onclick = () => send(input.value);
+  input.onkeydown = e => { if (e.key === "Enter") send(input.value); };
+  $("#chat-chips").onclick = e => { const b = e.target.closest("button"); if (b) send(b.textContent); };
+  msgs.onclick = e => { if (e.target.closest("a") && innerWidth < 860) panel.hidden = true; };   // on phones, close the chat after opening a page
+}
+
+    /* =========================================================
        7. START
        ========================================================= */
     $("#bg").onclick = () => $("#top").classList.toggle("open");   // mobile menu
     addEventListener("hashchange", route);
     route();
+        initChat();
   </script>
+
+  <script src="lifelink-voice.js"></script>
 </body>
 
 </html>
